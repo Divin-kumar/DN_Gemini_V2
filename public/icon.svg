@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#064e3b" />
+      <stop offset="50%" stop-color="#047857" />
+      <stop offset="100%" stop-color="#0f766e" />
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#a7f3d0" />
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  <!-- Background with subtle inner margin for squircle/maskable safe zone -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <circle cx="256" cy="256" r="210" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2" />
+  <circle cx="256" cy="256" r="160" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="2" stroke-dasharray="8 8" />
+  
+  <!-- DN Monogram & Life Arc Emblem -->
+  <g filter="url(#shadow)">
+    <!-- Arc representing life journey & financial balance -->
+    <path d="M 170 160 C 130 160, 110 200, 110 256 C 110 312, 130 352, 170 352 C 210 352, 230 312, 230 256" 
+          fill="none" stroke="url(#gold)" stroke-width="28" stroke-linecap="round" />
+    
+    <!-- Central intersection and N uprights -->
+    <path d="M 230 170 L 230 342" 
+          stroke="#ffffff" stroke-width="28" stroke-linecap="round" />
+    <path d="M 230 190 L 370 322" 
+          stroke="url(#gold)" stroke-width="28" stroke-linecap="round" />
+    <path d="M 370 170 L 370 342" 
+          stroke="#ffffff" stroke-width="28" stroke-linecap="round" />
+
+    <!-- Accent dot for focus/today -->
+    <circle cx="370" cy="140" r="14" fill="#6ee7b7" />
+  </g>
+</svg>

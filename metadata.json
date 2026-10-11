@@ -1,0 +1,6 @@
+{
+  "name": "DN",
+  "description": "DN is a premium, highly customizable, local-first personal life-management and expense-tracking application combining events, activities, memories, photos, expenses, and income in one connected system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
