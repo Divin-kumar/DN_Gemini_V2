@@ -60,7 +60,46 @@ export const db = new DNDatabase();
  */
 export async function initializeDatabase(): Promise<void> {
   const settingsCount = await db.appSettings.count();
-  if (settingsCount > 0) return;
+  if (settingsCount > 0) {
+    // Backfill any missing default code lists
+    const existingActStatus = await db.codeLists.where('key').equals('activity_statuses').first();
+    if (!existingActStatus) {
+      await db.codeLists.put({
+        id: 'cl_act_statuses',
+        key: 'activity_statuses',
+        name: 'Activity Statuses',
+        description: 'Progress statuses for tasks, events, and action items',
+        values: [
+          { id: 'st_pending', label: 'Pending', color: '#94a3b8', enabled: true, isDefault: true },
+          { id: 'st_in_progress', label: 'In Progress', color: '#3b82f6', enabled: true },
+          { id: 'st_completed', label: 'Completed', color: '#10b981', enabled: true },
+          { id: 'st_cancelled', label: 'Cancelled', color: '#64748b', enabled: true },
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    const existingTags = await db.codeLists.where('key').equals('tags').first();
+    if (!existingTags) {
+      await db.codeLists.put({
+        id: 'cl_tags',
+        key: 'tags',
+        name: 'Tags',
+        description: 'Organizational tags used across activities and events',
+        values: [
+          { id: 'tag_personal', label: 'Personal', color: '#10b981', enabled: true },
+          { id: 'tag_family', label: 'Family', color: '#ec4899', enabled: true },
+          { id: 'tag_work', label: 'Work', color: '#3b82f6', enabled: true },
+          { id: 'tag_finance', label: 'Finance', color: '#f59e0b', enabled: true },
+          { id: 'tag_health', label: 'Health', color: '#06b6d4', enabled: true },
+          { id: 'tag_travel', label: 'Travel', color: '#8b5cf6', enabled: true },
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    return;
+  }
 
   const now = new Date().toISOString();
 
@@ -153,6 +192,36 @@ export async function initializeDatabase(): Promise<void> {
         { id: 'sev_high', label: 'High', color: '#f97316', enabled: true },
         { id: 'sev_med', label: 'Medium', color: '#eab308', enabled: true, isDefault: true },
         { id: 'sev_low', label: 'Low', color: '#3b82f6', enabled: true },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: 'cl_act_statuses',
+      key: 'activity_statuses',
+      name: 'Activity Statuses',
+      description: 'Progress statuses for tasks, events, and action items',
+      values: [
+        { id: 'st_pending', label: 'Pending', color: '#94a3b8', enabled: true, isDefault: true },
+        { id: 'st_in_progress', label: 'In Progress', color: '#3b82f6', enabled: true },
+        { id: 'st_completed', label: 'Completed', color: '#10b981', enabled: true },
+        { id: 'st_cancelled', label: 'Cancelled', color: '#64748b', enabled: true },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: 'cl_tags',
+      key: 'tags',
+      name: 'Tags',
+      description: 'Organizational tags used across activities and events',
+      values: [
+        { id: 'tag_personal', label: 'Personal', color: '#10b981', enabled: true },
+        { id: 'tag_family', label: 'Family', color: '#ec4899', enabled: true },
+        { id: 'tag_work', label: 'Work', color: '#3b82f6', enabled: true },
+        { id: 'tag_finance', label: 'Finance', color: '#f59e0b', enabled: true },
+        { id: 'tag_health', label: 'Health', color: '#06b6d4', enabled: true },
+        { id: 'tag_travel', label: 'Travel', color: '#8b5cf6', enabled: true },
       ],
       createdAt: now,
       updatedAt: now,

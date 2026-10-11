@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Upload, Image as ImageIcon } from 'lucide-react';
 import type { PhotoRecord, EventRecord, ActivityRecord } from '../../types';
 
@@ -8,6 +8,7 @@ interface PhotoUploadModalProps {
   onSave: (photo: Omit<PhotoRecord, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
   events: EventRecord[];
   activities: ActivityRecord[];
+  initialData?: PhotoRecord | null;
   defaultEventId?: string;
   defaultActivityId?: string;
 }
@@ -18,6 +19,7 @@ export const PhotoUploadModal: React.FC<PhotoUploadModalProps> = ({
   onSave,
   events,
   activities,
+  initialData,
   defaultEventId,
   defaultActivityId,
 }) => {
@@ -29,6 +31,26 @@ export const PhotoUploadModal: React.FC<PhotoUploadModalProps> = ({
   const [activityId, setActivityId] = useState<string | undefined>(defaultActivityId);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (initialData) {
+      setCaption(initialData.caption || '');
+      setPreviewUrl(initialData.dataUrl || '');
+      setMimeType(initialData.mimeType || 'image/jpeg');
+      setFileSize(initialData.size || 0);
+      setEventId(initialData.eventId);
+      setActivityId(initialData.activityId);
+      setDate(initialData.date || new Date().toISOString().slice(0, 10));
+    } else {
+      setCaption('');
+      setPreviewUrl('');
+      setMimeType('image/jpeg');
+      setFileSize(0);
+      setEventId(defaultEventId || undefined);
+      setActivityId(defaultActivityId || undefined);
+      setDate(new Date().toISOString().slice(0, 10));
+    }
+  }, [initialData, defaultEventId, defaultActivityId, isOpen]);
 
   if (!isOpen) return null;
 
@@ -102,7 +124,7 @@ export const PhotoUploadModal: React.FC<PhotoUploadModalProps> = ({
         {/* Header */}
         <div className="px-6 py-4 border-b border-stone-100 dark:border-stone-800 flex items-center justify-between shrink-0">
           <h3 className="text-base font-bold text-stone-900 dark:text-stone-100">
-            Attach Photograph / Scan
+            {initialData ? 'Edit Photograph / Memory' : 'Attach Photograph / Scan'}
           </h3>
           <button onClick={onClose} className="p-1 text-stone-400 hover:text-stone-600 rounded-lg">
             <X className="w-5 h-5" />
@@ -111,53 +133,62 @@ export const PhotoUploadModal: React.FC<PhotoUploadModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1">
-          {/* File Picker & Preview */}
+          {/* File Picker / Dropzone */}
           <div>
-            <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 block mb-1">
-              Select Image <span className="text-rose-500">*</span>
+            <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">
+              {initialData ? 'Image (choose new to replace)' : 'Select Image'}
             </label>
-
-            {previewUrl ? (
-              <div className="relative rounded-xl overflow-hidden border border-stone-200 dark:border-stone-700 aspect-16/10 bg-stone-100 dark:bg-stone-800">
-                <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
-                <button
-                  type="button"
-                  onClick={() => setPreviewUrl('')}
-                  className="absolute top-2 right-2 p-1 bg-black/60 text-white rounded-lg hover:bg-black/80"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-stone-300 dark:border-stone-700 rounded-xl cursor-pointer hover:bg-stone-50 dark:hover:bg-stone-800/50 transition">
-                <Upload className="w-8 h-8 text-stone-400 mb-2" />
-                <span className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-                  Choose Photo from Device
-                </span>
-                <span className="text-[11px] text-stone-400 mt-0.5">
-                  PNG, JPG, or WebP up to 10MB
-                </span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
-              </label>
-            )}
+            <div className="mt-1.5 flex flex-col items-center justify-center border-2 border-dashed border-stone-300 dark:border-stone-700 rounded-xl p-4 text-center hover:bg-stone-50 dark:hover:bg-stone-800/40 transition">
+              {previewUrl ? (
+                <div className="relative group w-full flex flex-col items-center">
+                  <img
+                    src={previewUrl}
+                    alt="Preview"
+                    className="max-h-48 rounded-lg object-contain"
+                  />
+                  <label className="mt-2 text-xs text-emerald-700 dark:text-emerald-400 font-semibold cursor-pointer hover:underline">
+                    <span>Change Image</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileChange}
+                      className="sr-only"
+                    />
+                  </label>
+                </div>
+              ) : (
+                <label className="cursor-pointer flex flex-col items-center">
+                  <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 flex items-center justify-center mb-2">
+                    <Upload className="w-5 h-5" />
+                  </div>
+                  <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                    Tap to upload from device
+                  </span>
+                  <span className="text-[11px] text-stone-400 mt-0.5">
+                    JPEG, PNG, WebP up to 10MB
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    className="sr-only"
+                  />
+                </label>
+              )}
+            </div>
           </div>
 
           {/* Caption */}
           <div>
             <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-              Caption / Label
+              Caption / Description
             </label>
             <input
               type="text"
               value={caption}
               onChange={e => setCaption(e.target.value)}
-              placeholder="e.g. Ultrasound Scan at 21 Weeks, Lake Sunrise"
-              className="mt-1 w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-700"
+              placeholder="e.g. Birthday cake cutting, Ultrasound scan"
+              className="mt-1 w-full px-3 py-2 text-xs bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-700"
             />
           </div>
 
@@ -168,53 +199,55 @@ export const PhotoUploadModal: React.FC<PhotoUploadModalProps> = ({
             </label>
             <input
               type="date"
+              required
               value={date}
               onChange={e => setDate(e.target.value)}
-              className="mt-1 w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-700"
+              className="mt-1 w-full px-3 py-2 text-xs bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-700 font-mono"
             />
           </div>
 
-          {/* Link to Event */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-                Link to Event
-              </label>
-              <select
-                value={eventId || ''}
-                onChange={e => setEventId(e.target.value || undefined)}
-                className="mt-1 w-full px-3 py-2 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-700"
-              >
-                <option value="">None (Personal)</option>
-                {events.map(ev => (
-                  <option key={ev.id} value={ev.id}>
-                    {ev.title}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {/* Optional Event Linking */}
+          <div>
+            <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">
+              Link to Event (Optional)
+            </label>
+            <select
+              value={eventId || ''}
+              onChange={e => setEventId(e.target.value || undefined)}
+              className="mt-1 w-full px-3 py-2 text-xs bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-700"
+            >
+              <option value="">None (Standalone)</option>
+              {events.map(ev => (
+                <option key={ev.id} value={ev.id}>
+                  {ev.title}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            <div>
-              <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-                Link to Activity
-              </label>
-              <select
-                value={activityId || ''}
-                onChange={e => setActivityId(e.target.value || undefined)}
-                className="mt-1 w-full px-3 py-2 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-700"
-              >
-                <option value="">None</option>
-                {activities.map(act => (
+          {/* Optional Activity Linking */}
+          <div>
+            <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">
+              Link to Activity (Optional)
+            </label>
+            <select
+              value={activityId || ''}
+              onChange={e => setActivityId(e.target.value || undefined)}
+              className="mt-1 w-full px-3 py-2 text-xs bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-700"
+            >
+              <option value="">None (Standalone)</option>
+              {activities
+                .filter(a => !eventId || a.eventId === eventId)
+                .map(act => (
                   <option key={act.id} value={act.id}>
                     {act.title}
                   </option>
                 ))}
-              </select>
-            </div>
+            </select>
           </div>
 
-          {/* Footer */}
-          <div className="pt-4 border-t border-stone-100 dark:border-stone-800 flex items-center justify-end gap-3 shrink-0">
+          {/* Submit Buttons */}
+          <div className="pt-3 border-t border-stone-100 dark:border-stone-800 flex items-center justify-end gap-3">
             <button
               type="button"
               onClick={onClose}
@@ -225,9 +258,10 @@ export const PhotoUploadModal: React.FC<PhotoUploadModalProps> = ({
             <button
               type="submit"
               disabled={!previewUrl || saving}
-              className="px-4 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-xl transition shadow-xs disabled:opacity-50"
+              className="px-4 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-xl transition shadow-xs flex items-center gap-1.5 disabled:opacity-50"
             >
-              {saving ? 'Attaching...' : 'Save Attachment'}
+              <ImageIcon className="w-3.5 h-3.5" />
+              <span>{saving ? 'Saving...' : initialData ? 'Update Photo' : 'Save Attachment'}</span>
             </button>
           </div>
         </form>

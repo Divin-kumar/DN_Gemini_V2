@@ -6,6 +6,7 @@ import type {
   ActivityTypeDefinition,
   EventRecord,
 } from '../../types';
+import { SwipeableRow, type SwipeActionItem } from '../common/SwipeableRow';
 
 interface ActivityListProps {
   activities: ActivityRecord[];
@@ -13,7 +14,7 @@ interface ActivityListProps {
   events: EventRecord[];
   onToggleStatus: (id: string) => void;
   onEditActivity: (act: ActivityRecord) => void;
-  onDeleteActivity: (id: string) => void;
+  onDeleteActivity: (act: ActivityRecord) => void;
   onOpenCreateActivity: () => void;
   onSelectEvent: (eventId: string) => void;
 }
@@ -32,6 +33,7 @@ export const ActivityList: React.FC<ActivityListProps> = ({
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterPriority, setFilterPriority] = useState<string>('all');
   const [filterEventId, setFilterEventId] = useState<string>('all');
+  const [activeSwipeId, setActiveSwipeId] = useState<string | null>(null);
 
   const filtered = activities.filter(act => {
     const matchesStatus = filterStatus === 'all' || act.status === filterStatus;
@@ -72,7 +74,7 @@ export const ActivityList: React.FC<ActivityListProps> = ({
             Activities & Action Items
           </h2>
           <div className="text-xs text-stone-500 mt-0.5">
-            Tasks, appointments, daily reflections, and milestones.
+            Tasks, appointments, daily reflections, and milestones. Swipe left on any item to edit or delete.
           </div>
         </div>
 
@@ -136,7 +138,7 @@ export const ActivityList: React.FC<ActivityListProps> = ({
         </select>
       </div>
 
-      {/* Activities List */}
+      {/* Activities List with SwipeableRows */}
       {filtered.length > 0 ? (
         <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl divide-y divide-stone-100 dark:divide-stone-800 overflow-hidden shadow-2xs">
           {filtered.map(act => {
@@ -144,82 +146,110 @@ export const ActivityList: React.FC<ActivityListProps> = ({
             const parentEvent = events.find(e => e.id === act.eventId);
             const typeDef = activityTypes.find(t => t.id === act.activityTypeId);
 
+            const actions: SwipeActionItem[] = [
+              {
+                id: 'edit',
+                label: 'Edit',
+                icon: <Edit2 className="w-3.5 h-3.5" />,
+                variant: 'edit',
+                onClick: () => onEditActivity(act),
+                ariaLabel: `Edit activity ${act.title}`,
+              },
+              {
+                id: 'delete',
+                label: 'Delete',
+                icon: <Trash2 className="w-3.5 h-3.5" />,
+                variant: 'delete',
+                onClick: () => onDeleteActivity(act),
+                ariaLabel: `Delete activity ${act.title}`,
+              },
+            ];
+
             return (
-              <div
+              <SwipeableRow
                 key={act.id}
-                className="p-4 flex items-start justify-between gap-3 hover:bg-stone-50/50 dark:hover:bg-stone-800/30 transition group"
+                id={act.id}
+                activeRowId={activeSwipeId}
+                onRowOpen={setActiveSwipeId}
+                onRowClose={() => setActiveSwipeId(null)}
+                actions={actions}
               >
-                <div className="flex items-start gap-3 min-w-0 flex-1">
-                  <button
-                    onClick={() => handleToggle(act)}
-                    className="mt-0.5 text-stone-400 hover:text-emerald-700 dark:hover:text-emerald-400 shrink-0"
-                    title={isDone ? 'Mark Pending' : 'Mark Completed'}
-                  >
-                    {isDone ? (
-                      <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 fill-emerald-100 dark:fill-emerald-950" />
-                    ) : (
-                      <Circle className="w-5 h-5 text-stone-400 hover:text-emerald-600" />
-                    )}
-                  </button>
-
-                  <div className="min-w-0 flex-1">
-                    <div
-                      className={`text-sm font-semibold ${
-                        isDone
-                          ? 'line-through text-stone-400 dark:text-stone-500'
-                          : 'text-stone-900 dark:text-stone-100'
-                      }`}
+                <div className="p-4 flex items-start justify-between gap-3 hover:bg-stone-50/50 dark:hover:bg-stone-800/30 transition group">
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <button
+                      onClick={() => handleToggle(act)}
+                      className="mt-0.5 text-stone-400 hover:text-emerald-700 dark:hover:text-emerald-400 shrink-0"
+                      title={isDone ? 'Mark Pending' : 'Mark Completed'}
                     >
-                      {act.title}
-                    </div>
-
-                    {act.description && (
-                      <p className="text-xs text-stone-500 mt-0.5 line-clamp-2">
-                        {act.description}
-                      </p>
-                    )}
-
-                    <div className="flex items-center gap-2 text-xs text-stone-500 mt-1 flex-wrap">
-                      <span>{typeDef?.name || 'Activity'}</span>
-                      <span aria-hidden="true">·</span>
-                      <Clock className="w-3 h-3 text-stone-400" />
-                      <span>{new Date(act.date).toLocaleDateString()}</span>
-                      {act.time && <span>{act.time}</span>}
-                      {parentEvent && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <button
-                            onClick={() => onSelectEvent(parentEvent.id)}
-                            className="text-emerald-700 dark:text-emerald-400 font-medium hover:underline truncate max-w-[160px]"
-                          >
-                            {parentEvent.title}
-                          </button>
-                        </>
+                      {isDone ? (
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 fill-emerald-100 dark:fill-emerald-950" />
+                      ) : (
+                        <Circle className="w-5 h-5 text-stone-400 hover:text-emerald-600" />
                       )}
-                      <span aria-hidden="true">·</span>
-                      <span className="capitalize">{act.priority}</span>
+                    </button>
+
+                    <div className="min-w-0 flex-1">
+                      <div
+                        className={`text-sm font-semibold ${
+                          isDone
+                            ? 'line-through text-stone-400 dark:text-stone-500'
+                            : 'text-stone-900 dark:text-stone-100'
+                        }`}
+                      >
+                        {act.title}
+                      </div>
+
+                      {act.description && (
+                        <p className="text-xs text-stone-500 mt-0.5 line-clamp-2">
+                          {act.description}
+                        </p>
+                      )}
+
+                      <div className="flex items-center gap-2 text-xs text-stone-500 mt-1 flex-wrap">
+                        <span>{typeDef?.name || 'Activity'}</span>
+                        <span aria-hidden="true">·</span>
+                        <Clock className="w-3 h-3 text-stone-400" />
+                        <span>{new Date(act.date).toLocaleDateString()}</span>
+                        {act.time && <span>{act.time}</span>}
+                        {parentEvent && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <button
+                              type="button"
+                              onClick={() => onSelectEvent(parentEvent.id)}
+                              className="text-emerald-700 dark:text-emerald-400 font-medium hover:underline truncate max-w-[160px]"
+                            >
+                              {parentEvent.title}
+                            </button>
+                          </>
+                        )}
+                        <span aria-hidden="true">·</span>
+                        <span className="capitalize">{act.priority}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Actions */}
-                <div className="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition">
-                  <button
-                    onClick={() => onEditActivity(act)}
-                    className="p-1.5 text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 rounded-lg"
-                    title="Edit activity"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => onDeleteActivity(act.id)}
-                    className="p-1.5 text-stone-400 hover:text-rose-500 rounded-lg"
-                    title="Delete activity"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {/* Actions - visible on desktop */}
+                  <div className="hidden sm:flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition">
+                    <button
+                      type="button"
+                      onClick={() => onEditActivity(act)}
+                      className="p-1.5 text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 rounded-lg"
+                      title="Edit activity"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteActivity(act)}
+                      className="p-1.5 text-stone-400 hover:text-rose-500 rounded-lg"
+                      title="Delete activity"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-              </div>
+              </SwipeableRow>
             );
           })}
         </div>

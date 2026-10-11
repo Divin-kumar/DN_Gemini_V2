@@ -21,14 +21,20 @@ import {
   toggleActivityStatus,
   deleteActivity,
   createExpense,
+  updateExpense,
+  deleteExpense,
+  unlinkExpense,
   saveBudget,
   deleteBudget,
   saveSavingsGoal,
   updateSavingsGoalAmount,
   deleteSavingsGoal,
   createPhoto,
+  updatePhoto,
+  deletePhoto,
   unlinkPhoto,
   getOrCreateMonthlyDiaryEvent,
+  getCustomFields,
 } from './db/repository';
 import type {
   EventRecord,
@@ -48,6 +54,7 @@ import { BottomNav } from './components/layout/BottomNav';
 import { OfflineIndicator } from './components/common/OfflineIndicator';
 import { BackupReminderBanner } from './components/common/BackupReminderBanner';
 import { QuickAddModal } from './components/common/QuickAddModal';
+import { ConfirmDeleteModal, type DeleteTargetInfo } from './components/common/ConfirmDeleteModal';
 import { EventsDashboard } from './components/dashboard/EventsDashboard';
 import { ExpensesDashboard } from './components/dashboard/ExpensesDashboard';
 import { EventList } from './components/events/EventList';
@@ -60,7 +67,6 @@ import { BudgetsModal } from './components/expenses/BudgetsModal';
 import { SavingsGoalModal } from './components/expenses/SavingsGoalModal';
 import { PhotoUploadModal } from './components/photos/PhotoUploadModal';
 import { SettingsView } from './components/settings/SettingsView';
-import { getCustomFields } from './db/repository';
 
 export default function App() {
   const { theme } = useTheme();
@@ -109,7 +115,12 @@ export default function App() {
   const [isBudgetsModalOpen, setIsBudgetsModalOpen] = useState(false);
   const [isSavingsModalOpen, setIsSavingsModalOpen] = useState(false);
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
+  const [editingPhoto, setEditingPhoto] = useState<PhotoRecord | null>(null);
   const [photoDefaultEventId, setPhotoDefaultEventId] = useState<string | undefined>(undefined);
+
+  // In-app Delete Confirmation Modal State
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTargetInfo | null>(null);
+  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
 
   // Selected event custom fields for detail view
   const [selectedEventCustomFields, setSelectedEventCustomFields] = useState<any[]>([]);
@@ -211,6 +222,118 @@ export default function App() {
     setActivities(updatedActs);
   };
 
+  // ----------------------------------------------------
+  // Central Swipe-to-Edit & Swipe-to-Delete Handlers
+  // ----------------------------------------------------
+
+  const handleEditExpense = (exp: ExpenseRecord) => {
+    setEditingExpense(exp);
+    setExpenseDefaultEventId(exp.eventId);
+    setExpenseDefaultActivityId(exp.activityId);
+    setIsExpenseModalOpen(true);
+  };
+
+  const handleDeleteExpense = (exp: ExpenseRecord) => {
+    setDeleteTarget({
+      type: exp.type === 'income' ? 'income' : 'expense',
+      id: exp.id,
+      title: exp.notes || exp.category,
+      subtitle: `${exp.type === 'income' ? 'Income Transaction' : 'Expense Transaction'} · ${exp.category}`,
+      amountFormatted: `${exp.type === 'income' ? '+' : '-'}${settings.currencySymbol}${exp.amount.toLocaleString('en-IN')}`,
+      date: exp.date,
+      category: exp.category,
+      paymentMethod: exp.paymentMethod,
+      transactionType: exp.type,
+      isLinked: !!(exp.eventId || exp.activityId),
+      linkedParentTitle: exp.eventId ? events.find(e => e.id === exp.eventId)?.title : undefined,
+      onUnlinkInstead:
+        exp.eventId || exp.activityId
+          ? async () => {
+              await unlinkExpense(exp.id);
+              await refreshAllData();
+            }
+          : undefined,
+    });
+    setIsConfirmDeleteOpen(true);
+  };
+
+  const handleUnlinkExpense = async (expId: string) => {
+    await unlinkExpense(expId);
+    await refreshAllData();
+  };
+
+  const handleEditEvent = (evt: EventRecord) => {
+    setEditingEvent(evt);
+    setIsEventModalOpen(true);
+  };
+
+  const handleDeleteEvent = (evt: EventRecord) => {
+    const typeDef = eventTypes.find(t => t.id === evt.eventTypeId);
+    setDeleteTarget({
+      type: 'event',
+      id: evt.id,
+      title: evt.title,
+      subtitle: `Event Type: ${typeDef?.name || 'Event'}`,
+      date: evt.startDate,
+    });
+    setIsConfirmDeleteOpen(true);
+  };
+
+  const handleEditActivity = (act: ActivityRecord) => {
+    setEditingActivity(act);
+    setActivityDefaultEventId(act.eventId);
+    setIsActivityModalOpen(true);
+  };
+
+  const handleDeleteActivity = (act: ActivityRecord) => {
+    const parentEvent = events.find(e => e.id === act.eventId);
+    setDeleteTarget({
+      type: 'activity',
+      id: act.id,
+      title: act.title,
+      subtitle: parentEvent ? `Event: ${parentEvent.title}` : 'Standalone Activity',
+      date: act.date,
+    });
+    setIsConfirmDeleteOpen(true);
+  };
+
+  const handleEditPhoto = (p: PhotoRecord) => {
+    setEditingPhoto(p);
+    setPhotoDefaultEventId(p.eventId);
+    setIsPhotoModalOpen(true);
+  };
+
+  const handleDeletePhoto = (p: PhotoRecord) => {
+    setDeleteTarget({
+      type: 'photo',
+      id: p.id,
+      title: p.caption || 'Photo attachment',
+      subtitle: p.eventId ? `Event Attachment` : 'Memory Photo',
+      date: p.date,
+    });
+    setIsConfirmDeleteOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+
+    if (deleteTarget.type === 'expense' || deleteTarget.type === 'income') {
+      await deleteExpense(deleteTarget.id);
+    } else if (deleteTarget.type === 'event') {
+      await deleteEvent(deleteTarget.id);
+      if (selectedEventId === deleteTarget.id) {
+        setSelectedEventId(null);
+      }
+    } else if (deleteTarget.type === 'activity') {
+      await deleteActivity(deleteTarget.id);
+    } else if (deleteTarget.type === 'photo') {
+      await deletePhoto(deleteTarget.id);
+    }
+
+    await refreshAllData();
+    setDeleteTarget(null);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-stone-50 dark:bg-stone-950 flex flex-col items-center justify-center p-4">
@@ -263,36 +386,37 @@ export default function App() {
             customFields={selectedEventCustomFields}
             settings={settings}
             onBack={() => setSelectedEventId(null)}
-            onEdit={() => {
-              setEditingEvent(selectedEvent);
-              setIsEventModalOpen(true);
-            }}
+            onEdit={() => handleEditEvent(selectedEvent)}
             onArchive={async () => {
               await archiveEvent(selectedEvent.id);
               await refreshAllData();
               setSelectedEventId(null);
             }}
-            onDelete={async () => {
-              await deleteEvent(selectedEvent.id);
-              await refreshAllData();
-              setSelectedEventId(null);
-            }}
+            onDelete={() => handleDeleteEvent(selectedEvent)}
             onToggleActivity={handleToggleActivity}
             onAddActivity={() => {
               setEditingActivity(null);
               setActivityDefaultEventId(selectedEvent.id);
               setIsActivityModalOpen(true);
             }}
+            onEditActivity={handleEditActivity}
+            onDeleteActivity={handleDeleteActivity}
             onAddExpense={() => {
               setEditingExpense(null);
               setExpenseDefaultEventId(selectedEvent.id);
               setExpenseDefaultActivityId(undefined);
               setIsExpenseModalOpen(true);
             }}
+            onEditExpense={handleEditExpense}
+            onDeleteExpense={handleDeleteExpense}
+            onUnlinkExpense={handleUnlinkExpense}
             onAddPhoto={() => {
+              setEditingPhoto(null);
               setPhotoDefaultEventId(selectedEvent.id);
               setIsPhotoModalOpen(true);
             }}
+            onEditPhoto={handleEditPhoto}
+            onDeletePhoto={handleDeletePhoto}
             onUnlinkPhoto={async photoId => {
               await unlinkPhoto(photoId, 'event');
               const updatedPhotos = await getAllPhotos();
@@ -304,7 +428,7 @@ export default function App() {
             {/* TAB: DASHBOARD */}
             {activeTab === 'dashboard' && (
               <div className="space-y-6">
-                {/* Mode Switch: Expenses | Events (Persisted, Non-slop segmented button) */}
+                {/* Mode Switch: Expenses | Events */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center p-1 bg-stone-200/70 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl">
                     <button
@@ -349,6 +473,8 @@ export default function App() {
                       setActivityDefaultEventId(undefined);
                       setIsActivityModalOpen(true);
                     }}
+                    onEditActivity={handleEditActivity}
+                    onDeleteActivity={handleDeleteActivity}
                   />
                 ) : (
                   <ExpensesDashboard
@@ -364,6 +490,9 @@ export default function App() {
                     }}
                     onOpenManageBudgets={() => setIsBudgetsModalOpen(true)}
                     onOpenManageSavings={() => setIsSavingsModalOpen(true)}
+                    onEditExpense={handleEditExpense}
+                    onDeleteExpense={handleDeleteExpense}
+                    onUnlinkExpense={handleUnlinkExpense}
                   />
                 )}
               </div>
@@ -380,6 +509,8 @@ export default function App() {
                   setEditingEvent(null);
                   setIsEventModalOpen(true);
                 }}
+                onEditEvent={handleEditEvent}
+                onDeleteEvent={handleDeleteEvent}
               />
             )}
 
@@ -390,15 +521,8 @@ export default function App() {
                 activityTypes={activityTypes}
                 events={events}
                 onToggleStatus={handleToggleActivity}
-                onEditActivity={act => {
-                  setEditingActivity(act);
-                  setIsActivityModalOpen(true);
-                }}
-                onDeleteActivity={async id => {
-                  await deleteActivity(id);
-                  const updated = await getAllActivities();
-                  setActivities(updated);
-                }}
+                onEditActivity={handleEditActivity}
+                onDeleteActivity={handleDeleteActivity}
                 onOpenCreateActivity={() => {
                   setEditingActivity(null);
                   setActivityDefaultEventId(undefined);
@@ -423,6 +547,9 @@ export default function App() {
                 }}
                 onOpenManageBudgets={() => setIsBudgetsModalOpen(true)}
                 onOpenManageSavings={() => setIsSavingsModalOpen(true)}
+                onEditExpense={handleEditExpense}
+                onDeleteExpense={handleDeleteExpense}
+                onUnlinkExpense={handleUnlinkExpense}
               />
             )}
 
@@ -466,7 +593,10 @@ export default function App() {
       {/* 7. Event Modal */}
       <EventModal
         isOpen={isEventModalOpen}
-        onClose={() => setIsEventModalOpen(false)}
+        onClose={() => {
+          setIsEventModalOpen(false);
+          setEditingEvent(null);
+        }}
         initialData={editingEvent}
         eventTypes={eventTypes}
         currencySymbol={settings.currencySymbol}
@@ -483,7 +613,10 @@ export default function App() {
       {/* 8. Activity Modal */}
       <ActivityModal
         isOpen={isActivityModalOpen}
-        onClose={() => setIsActivityModalOpen(false)}
+        onClose={() => {
+          setIsActivityModalOpen(false);
+          setEditingActivity(null);
+        }}
         initialData={editingActivity}
         activityTypes={activityTypes}
         events={events}
@@ -502,7 +635,10 @@ export default function App() {
       {/* 9. Expense Modal */}
       <ExpenseModal
         isOpen={isExpenseModalOpen}
-        onClose={() => setIsExpenseModalOpen(false)}
+        onClose={() => {
+          setIsExpenseModalOpen(false);
+          setEditingExpense(null);
+        }}
         initialData={editingExpense}
         events={events}
         activities={activities}
@@ -512,7 +648,11 @@ export default function App() {
         paymentMethodList={codeLists.find(cl => cl.key === 'payment_methods')}
         settings={settings}
         onSave={async data => {
-          await createExpense(data);
+          if (editingExpense) {
+            await updateExpense(editingExpense.id, data);
+          } else {
+            await createExpense(data);
+          }
           await refreshAllData();
         }}
       />
@@ -562,15 +702,32 @@ export default function App() {
       {/* 12. Photo / Attachment Modal */}
       <PhotoUploadModal
         isOpen={isPhotoModalOpen}
-        onClose={() => setIsPhotoModalOpen(false)}
+        onClose={() => {
+          setIsPhotoModalOpen(false);
+          setEditingPhoto(null);
+        }}
+        initialData={editingPhoto}
         events={events}
         activities={activities}
         defaultEventId={photoDefaultEventId}
         onSave={async p => {
-          await createPhoto(p);
+          if (editingPhoto) {
+            await updatePhoto(editingPhoto.id, p);
+          } else {
+            await createPhoto(p);
+          }
           const updated = await getAllPhotos();
           setPhotos(updated);
         }}
+      />
+
+      {/* 13. App-Wide Confirm Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={isConfirmDeleteOpen}
+        onClose={() => setIsConfirmDeleteOpen(false)}
+        onConfirm={handleConfirmDelete}
+        target={deleteTarget}
+        currencySymbol={settings.currencySymbol}
       />
     </div>
   );

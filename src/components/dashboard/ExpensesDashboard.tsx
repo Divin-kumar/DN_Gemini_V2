@@ -1,6 +1,18 @@
 import React, { useState } from 'react';
-import { Plus, ArrowUpRight, ArrowDownRight, Wallet, Target, PiggyBank, Search } from 'lucide-react';
+import {
+  Plus,
+  ArrowUpRight,
+  ArrowDownRight,
+  Wallet,
+  Target,
+  PiggyBank,
+  Search,
+  Edit2,
+  Trash2,
+  Link2Off,
+} from 'lucide-react';
 import type { ExpenseRecord, BudgetRecord, SavingsGoalRecord, AppSettings } from '../../types';
+import { SwipeableRow, type SwipeActionItem } from '../common/SwipeableRow';
 
 interface ExpensesDashboardProps {
   expenses: ExpenseRecord[];
@@ -10,7 +22,9 @@ interface ExpensesDashboardProps {
   onOpenAddExpense: () => void;
   onOpenManageBudgets: () => void;
   onOpenManageSavings: () => void;
-  onSelectExpense?: (exp: ExpenseRecord) => void;
+  onEditExpense: (exp: ExpenseRecord) => void;
+  onDeleteExpense: (exp: ExpenseRecord) => void;
+  onUnlinkExpense?: (expId: string) => void;
 }
 
 export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({
@@ -21,9 +35,14 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({
   onOpenAddExpense,
   onOpenManageBudgets,
   onOpenManageSavings,
+  onEditExpense,
+  onDeleteExpense,
+  onUnlinkExpense,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState<'all' | 'expense' | 'income'>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [activeSwipeId, setActiveSwipeId] = useState<string | null>(null);
 
   const now = new Date();
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -55,14 +74,15 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({
   const budgetSpentPercent =
     totalBudgetLimit > 0 ? Math.min(100, Math.round((totalExpense / totalBudgetLimit) * 100)) : 0;
 
-  // Filtered transactions for list
+  // Filtered transactions for list (with search, category, and type filter)
   const filteredList = expenses.filter(e => {
     const matchesSearch =
       searchTerm === '' ||
       e.notes.toLowerCase().includes(searchTerm.toLowerCase()) ||
       e.category.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCat = selectedCategory === 'all' || e.category === selectedCategory;
-    return matchesSearch && matchesCat;
+    const matchesType = selectedTypeFilter === 'all' || e.type === selectedTypeFilter;
+    return matchesSearch && matchesCat && matchesType;
   });
 
   return (
@@ -161,7 +181,7 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({
         </div>
       </div>
 
-      {/* 2. Savings Goals Carousel/Grid */}
+      {/* 2. Savings Goals */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -266,59 +286,182 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({
         </div>
       )}
 
-      {/* 4. Transactions List with Filter & Search */}
+      {/* 4. Transactions List with Swipe Actions & Filters */}
       <div className="space-y-3 pt-2">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
-            Recent Transactions
-          </h3>
-          <div className="relative w-full sm:w-64">
-            <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-2.5" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              placeholder="Search by notes or category..."
-              className="w-full pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-700"
-            />
+          <div>
+            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+              Transactions & Records
+            </h3>
+            <p className="text-[11px] text-stone-400">
+              Swipe left on any row for Edit, Unlink, or Delete actions.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Type Filter */}
+            <div className="flex items-center p-0.5 bg-stone-100 dark:bg-stone-800 rounded-lg text-xs font-semibold">
+              <button
+                onClick={() => setSelectedTypeFilter('all')}
+                className={`px-2.5 py-1 rounded-md transition ${
+                  selectedTypeFilter === 'all'
+                    ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 shadow-2xs'
+                    : 'text-stone-500 hover:text-stone-800'
+                }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setSelectedTypeFilter('expense')}
+                className={`px-2.5 py-1 rounded-md transition ${
+                  selectedTypeFilter === 'expense'
+                    ? 'bg-white dark:bg-stone-900 text-rose-600 dark:text-rose-400 shadow-2xs'
+                    : 'text-stone-500 hover:text-stone-800'
+                }`}
+              >
+                Expenses
+              </button>
+              <button
+                onClick={() => setSelectedTypeFilter('income')}
+                className={`px-2.5 py-1 rounded-md transition ${
+                  selectedTypeFilter === 'income'
+                    ? 'bg-white dark:bg-stone-900 text-emerald-700 dark:text-emerald-400 shadow-2xs'
+                    : 'text-stone-500 hover:text-stone-800'
+                }`}
+              >
+                Income
+              </button>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative w-full sm:w-52">
+              <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                placeholder="Search notes or category..."
+                className="w-full pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-700"
+              />
+            </div>
           </div>
         </div>
 
         {filteredList.length > 0 ? (
           <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl divide-y divide-stone-100 dark:divide-stone-800 overflow-hidden shadow-2xs">
-            {filteredList.slice(0, 10).map(tx => (
-              <div
-                key={tx.id}
-                className="px-4 py-3.5 flex items-center justify-between gap-3 hover:bg-stone-50 dark:hover:bg-stone-800/40 transition"
-              >
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-stone-900 dark:text-stone-100 truncate">
-                    {tx.notes || tx.category}
-                  </div>
-                  <div className="flex items-center gap-1.5 text-xs text-stone-500 mt-0.5">
-                    <span>{tx.category}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{tx.paymentMethod}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{new Date(tx.date).toLocaleDateString()}</span>
-                  </div>
-                </div>
+            {filteredList.map(tx => {
+              const isLinked = !!(tx.eventId || tx.activityId);
 
-                <div className="text-right shrink-0">
-                  <span
-                    className={`text-sm font-bold font-mono tabular-nums ${
-                      tx.type === 'income'
-                        ? 'text-emerald-700 dark:text-emerald-400'
-                        : 'text-stone-900 dark:text-stone-100'
-                    }`}
-                  >
-                    {tx.type === 'income' ? '+' : '-'}
-                    {settings.currencySymbol}
-                    {tx.amount.toLocaleString('en-IN')}
-                  </span>
-                </div>
-              </div>
-            ))}
+              // Build swipe actions for this transaction
+              const actions: SwipeActionItem[] = [
+                {
+                  id: 'edit',
+                  label: 'Edit',
+                  icon: <Edit2 className="w-3.5 h-3.5" />,
+                  variant: 'edit',
+                  onClick: () => onEditExpense(tx),
+                  ariaLabel: `Edit transaction ${tx.notes || tx.category}`,
+                },
+              ];
+
+              if (isLinked && onUnlinkExpense) {
+                actions.push({
+                  id: 'unlink',
+                  label: 'Unlink',
+                  icon: <Link2Off className="w-3.5 h-3.5" />,
+                  variant: 'unlink',
+                  onClick: () => onUnlinkExpense(tx.id),
+                  ariaLabel: `Unlink transaction ${tx.notes || tx.category}`,
+                });
+              }
+
+              actions.push({
+                id: 'delete',
+                label: 'Delete',
+                icon: <Trash2 className="w-3.5 h-3.5" />,
+                variant: 'delete',
+                onClick: () => onDeleteExpense(tx),
+                ariaLabel: `Delete transaction ${tx.notes || tx.category}`,
+              });
+
+              return (
+                <SwipeableRow
+                  key={tx.id}
+                  id={tx.id}
+                  activeRowId={activeSwipeId}
+                  onRowOpen={setActiveSwipeId}
+                  onRowClose={() => setActiveSwipeId(null)}
+                  actions={actions}
+                >
+                  <div className="px-4 py-3.5 flex items-center justify-between gap-3 hover:bg-stone-50 dark:hover:bg-stone-800/40 transition group">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-stone-900 dark:text-stone-100 truncate">
+                        {tx.notes || tx.category}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs text-stone-500 mt-0.5 flex-wrap">
+                        <span>{tx.category}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{tx.paymentMethod}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{new Date(tx.date).toLocaleDateString()}</span>
+                        {isLinked && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.5 rounded">
+                              Linked
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span
+                        className={`text-sm font-bold font-mono tabular-nums ${
+                          tx.type === 'income'
+                            ? 'text-emerald-700 dark:text-emerald-400'
+                            : 'text-stone-900 dark:text-stone-100'
+                        }`}
+                      >
+                        {tx.type === 'income' ? '+' : '-'}
+                        {settings.currencySymbol}
+                        {tx.amount.toLocaleString('en-IN')}
+                      </span>
+
+                      {/* Visible Non-Swipe Action Alternative */}
+                      <div className="hidden sm:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                        <button
+                          type="button"
+                          onClick={() => onEditExpense(tx)}
+                          className="p-1.5 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 rounded-lg"
+                          title="Edit"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        {isLinked && onUnlinkExpense && (
+                          <button
+                            type="button"
+                            onClick={() => onUnlinkExpense(tx.id)}
+                            className="p-1.5 text-stone-400 hover:text-amber-600 rounded-lg"
+                            title="Unlink"
+                          >
+                            <Link2Off className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onDeleteExpense(tx)}
+                          className="p-1.5 text-stone-400 hover:text-rose-600 rounded-lg"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </SwipeableRow>
+              );
+            })}
           </div>
         ) : (
           <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-8 text-center text-stone-400 text-xs">

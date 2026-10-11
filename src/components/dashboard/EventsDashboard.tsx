@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import confetti from 'canvas-confetti';
 import {
   Calendar,
@@ -9,6 +9,8 @@ import {
   Plus,
   ArrowRight,
   Sparkles,
+  Edit2,
+  Trash2,
 } from 'lucide-react';
 import type {
   EventRecord,
@@ -20,6 +22,7 @@ import type {
 } from '../../types';
 import { DynamicIcon } from '../common/DynamicIcon';
 import { evaluateEventSummary } from '../../services/summaryEngine';
+import { SwipeableRow, type SwipeActionItem } from '../common/SwipeableRow';
 
 interface EventsDashboardProps {
   events: EventRecord[];
@@ -32,6 +35,8 @@ interface EventsDashboardProps {
   onSelectEvent: (eventId: string) => void;
   onOpenCreateEvent: () => void;
   onOpenCreateActivity: () => void;
+  onEditActivity?: (act: ActivityRecord) => void;
+  onDeleteActivity?: (act: ActivityRecord) => void;
 }
 
 export const EventsDashboard: React.FC<EventsDashboardProps> = ({
@@ -45,7 +50,10 @@ export const EventsDashboard: React.FC<EventsDashboardProps> = ({
   onSelectEvent,
   onOpenCreateEvent,
   onOpenCreateActivity,
+  onEditActivity,
+  onDeleteActivity,
 }) => {
+  const [activeSwipeId, setActiveSwipeId] = useState<string | null>(null);
   const todayStr = new Date().toISOString().slice(0, 10);
 
   // Today's activities
@@ -139,7 +147,7 @@ export const EventsDashboard: React.FC<EventsDashboardProps> = ({
         </div>
       )}
 
-      {/* 3. Today's Activities List */}
+      {/* 3. Today's Activities List with SwipeableRows */}
       <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-5 shadow-xs">
         <div className="flex items-center justify-between pb-3 border-b border-stone-100 dark:border-stone-800">
           <div className="flex items-center gap-2">
@@ -159,58 +167,114 @@ export const EventsDashboard: React.FC<EventsDashboardProps> = ({
               const isDone = act.status === 'completed';
               const parentEvent = events.find(e => e.id === act.eventId);
 
-              return (
-                <div
-                  key={act.id}
-                  className="py-3 flex items-start gap-3 group hover:bg-stone-50/50 dark:hover:bg-stone-800/20 px-2 rounded-xl transition"
-                >
-                  <button
-                    onClick={() => handleComplete(act.id, isDone)}
-                    className="mt-0.5 text-stone-400 hover:text-emerald-700 dark:hover:text-emerald-400 transition"
-                    title={isDone ? 'Mark Pending' : 'Mark Completed'}
-                  >
-                    {isDone ? (
-                      <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 fill-emerald-100 dark:fill-emerald-950" />
-                    ) : (
-                      <Circle className="w-5 h-5 text-stone-400 hover:text-emerald-600" />
-                    )}
-                  </button>
+              const actions: SwipeActionItem[] = [];
+              if (onEditActivity) {
+                actions.push({
+                  id: 'edit',
+                  label: 'Edit',
+                  icon: <Edit2 className="w-3.5 h-3.5" />,
+                  variant: 'edit',
+                  onClick: () => onEditActivity(act),
+                  ariaLabel: `Edit activity ${act.title}`,
+                });
+              }
+              if (onDeleteActivity) {
+                actions.push({
+                  id: 'delete',
+                  label: 'Delete',
+                  icon: <Trash2 className="w-3.5 h-3.5" />,
+                  variant: 'delete',
+                  onClick: () => onDeleteActivity(act),
+                  ariaLabel: `Delete activity ${act.title}`,
+                });
+              }
 
-                  <div className="min-w-0 flex-1">
-                    <div
-                      className={`text-sm font-medium ${
-                        isDone
-                          ? 'line-through text-stone-400 dark:text-stone-500'
-                          : 'text-stone-900 dark:text-stone-100'
-                      }`}
-                    >
-                      {act.title}
+              return (
+                <SwipeableRow
+                  key={act.id}
+                  id={`today_${act.id}`}
+                  activeRowId={activeSwipeId}
+                  onRowOpen={setActiveSwipeId}
+                  onRowClose={() => setActiveSwipeId(null)}
+                  actions={actions}
+                >
+                  <div className="py-3 flex items-start justify-between gap-3 group hover:bg-stone-50/50 dark:hover:bg-stone-800/20 px-2 rounded-xl transition">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <button
+                        type="button"
+                        onClick={() => handleComplete(act.id, isDone)}
+                        className="mt-0.5 text-stone-400 hover:text-emerald-700 dark:hover:text-emerald-400 transition shrink-0"
+                        title={isDone ? 'Mark Pending' : 'Mark Completed'}
+                      >
+                        {isDone ? (
+                          <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 fill-emerald-100 dark:fill-emerald-950" />
+                        ) : (
+                          <Circle className="w-5 h-5 text-stone-400 hover:text-emerald-600" />
+                        )}
+                      </button>
+
+                      <div className="min-w-0 flex-1">
+                        <div
+                          className={`text-sm font-medium ${
+                            isDone
+                              ? 'line-through text-stone-400 dark:text-stone-500'
+                              : 'text-stone-900 dark:text-stone-100'
+                          }`}
+                        >
+                          {act.title}
+                        </div>
+
+                        <div className="flex items-center gap-2 text-xs text-stone-500 mt-0.5 flex-wrap">
+                          {act.time && (
+                            <span>{act.time}</span>
+                          )}
+                          {parentEvent && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <button
+                                type="button"
+                                onClick={() => onSelectEvent(parentEvent.id)}
+                                className="text-emerald-700 dark:text-emerald-400 hover:underline truncate max-w-[200px]"
+                              >
+                                {parentEvent.title}
+                              </button>
+                            </>
+                          )}
+                          {act.priority && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="capitalize">{act.priority} priority</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-2 text-xs text-stone-500 mt-0.5 flex-wrap">
-                      {act.time && (
-                        <span>{act.time}</span>
+                    {/* Visible desktop actions */}
+                    <div className="hidden sm:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition shrink-0">
+                      {onEditActivity && (
+                        <button
+                          type="button"
+                          onClick={() => onEditActivity(act)}
+                          className="p-1 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 rounded"
+                          title="Edit"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
                       )}
-                      {parentEvent && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <button
-                            onClick={() => onSelectEvent(parentEvent.id)}
-                            className="text-emerald-700 dark:text-emerald-400 hover:underline truncate max-w-[200px]"
-                          >
-                            {parentEvent.title}
-                          </button>
-                        </>
-                      )}
-                      {act.priority && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span className="capitalize">{act.priority} priority</span>
-                        </>
+                      {onDeleteActivity && (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteActivity(act)}
+                          className="p-1 text-stone-400 hover:text-rose-600 rounded"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       )}
                     </div>
                   </div>
-                </div>
+                </SwipeableRow>
               );
             })}
           </div>
@@ -357,7 +421,7 @@ export const EventsDashboard: React.FC<EventsDashboardProps> = ({
         </div>
       )}
 
-      {/* 5. Upcoming Activities & Future Agenda */}
+      {/* 5. Upcoming Activities with SwipeableRows */}
       {upcomingActivities.length > 0 && (
         <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-5 shadow-xs">
           <div className="flex items-center justify-between pb-3 border-b border-stone-100 dark:border-stone-800">
@@ -370,26 +434,84 @@ export const EventsDashboard: React.FC<EventsDashboardProps> = ({
           </div>
 
           <div className="divide-y divide-stone-100 dark:divide-stone-800 pt-1">
-            {upcomingActivities.map(act => (
-              <div key={act.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
-                <div className="min-w-0">
-                  <span className="font-medium text-stone-900 dark:text-stone-100 truncate block">
-                    {act.title}
-                  </span>
-                  <span className="text-stone-500">
-                    {new Date(act.date).toLocaleDateString(undefined, {
-                      weekday: 'short',
-                      month: 'short',
-                      day: 'numeric',
-                    })}
-                    {act.time ? ` at ${act.time}` : ''}
-                  </span>
-                </div>
-                <span className="text-[11px] font-medium text-stone-500 capitalize bg-stone-100 dark:bg-stone-800 px-2 py-0.5 rounded">
-                  {act.priority}
-                </span>
-              </div>
-            ))}
+            {upcomingActivities.map(act => {
+              const actions: SwipeActionItem[] = [];
+              if (onEditActivity) {
+                actions.push({
+                  id: 'edit',
+                  label: 'Edit',
+                  icon: <Edit2 className="w-3.5 h-3.5" />,
+                  variant: 'edit',
+                  onClick: () => onEditActivity(act),
+                });
+              }
+              if (onDeleteActivity) {
+                actions.push({
+                  id: 'delete',
+                  label: 'Delete',
+                  icon: <Trash2 className="w-3.5 h-3.5" />,
+                  variant: 'delete',
+                  onClick: () => onDeleteActivity(act),
+                });
+              }
+
+              return (
+                <SwipeableRow
+                  key={act.id}
+                  id={`up_${act.id}`}
+                  activeRowId={activeSwipeId}
+                  onRowOpen={setActiveSwipeId}
+                  onRowClose={() => setActiveSwipeId(null)}
+                  actions={actions}
+                >
+                  <div className="py-2.5 px-2 flex items-center justify-between gap-3 text-xs group hover:bg-stone-50/50 dark:hover:bg-stone-800/20 transition">
+                    <div className="min-w-0">
+                      <span className="font-medium text-stone-900 dark:text-stone-100 truncate block">
+                        {act.title}
+                      </span>
+                      <span className="text-stone-500">
+                        {new Date(act.date).toLocaleDateString(undefined, {
+                          weekday: 'short',
+                          month: 'short',
+                          day: 'numeric',
+                        })}
+                        {act.time ? ` at ${act.time}` : ''}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[11px] font-medium text-stone-500 capitalize bg-stone-100 dark:bg-stone-800 px-2 py-0.5 rounded">
+                        {act.priority}
+                      </span>
+
+                      {/* Visible desktop actions */}
+                      <div className="hidden sm:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                        {onEditActivity && (
+                          <button
+                            type="button"
+                            onClick={() => onEditActivity(act)}
+                            className="p-1 text-stone-400 hover:text-stone-700"
+                            title="Edit"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {onDeleteActivity && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteActivity(act)}
+                            className="p-1 text-stone-400 hover:text-rose-600"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </SwipeableRow>
+              );
+            })}
           </div>
         </div>
       )}

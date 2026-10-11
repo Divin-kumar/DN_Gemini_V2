@@ -341,6 +341,20 @@ export async function deleteExpense(id: string): Promise<void> {
   await db.expenses.delete(id);
 }
 
+export async function unlinkExpense(
+  id: string,
+  options?: { fromEvent?: boolean; fromActivity?: boolean }
+): Promise<ExpenseRecord> {
+  const existing = await db.expenses.get(id);
+  if (!existing) throw new Error(`Expense ${id} not found`);
+
+  const updates: Partial<ExpenseRecord> = {};
+  if (options?.fromEvent ?? true) updates.eventId = undefined;
+  if (options?.fromActivity ?? true) updates.activityId = undefined;
+
+  return updateExpense(id, updates);
+}
+
 // ==========================================
 // PHOTOS & ATTACHMENTS REPOSITORY
 // ==========================================
@@ -387,6 +401,22 @@ export async function unlinkPhoto(photoId: string, fromType: 'event' | 'activity
 
 export async function deletePhoto(id: string): Promise<void> {
   await db.photos.delete(id);
+}
+
+export async function updatePhoto(
+  id: string,
+  updates: Partial<Omit<PhotoRecord, 'id' | 'createdAt'>>
+): Promise<PhotoRecord> {
+  const existing = await db.photos.get(id);
+  if (!existing) throw new Error(`Photo ${id} not found`);
+
+  const updated: PhotoRecord = {
+    ...existing,
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  };
+  await db.photos.put(updated);
+  return updated;
 }
 
 // ==========================================
@@ -529,6 +559,25 @@ export async function saveCodeList(codeList: CodeListDefinition): Promise<void> 
     ...codeList,
     updatedAt: new Date().toISOString(),
   });
+}
+
+export async function checkCodeListValueUsage(
+  codeListKey: string,
+  valueLabel: string
+): Promise<number> {
+  if (codeListKey === 'expense_categories' || codeListKey === 'income_categories') {
+    return db.expenses.where('category').equals(valueLabel).count();
+  }
+  if (codeListKey === 'payment_methods') {
+    return db.expenses.where('paymentMethod').equals(valueLabel).count();
+  }
+  if (codeListKey === 'activity_statuses') {
+    return db.activities.where('status').equals(valueLabel).count();
+  }
+  if (codeListKey === 'priorities') {
+    return db.activities.where('priority').equals(valueLabel).count();
+  }
+  return 0;
 }
 
 // ==========================================

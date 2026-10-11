@@ -14,12 +14,16 @@ import {
   Trash2,
   AlertTriangle,
   RotateCcw,
+  Edit2,
+  Check,
+  X,
 } from 'lucide-react';
 import type {
   AppSettings,
   EventTypeDefinition,
   ActivityTypeDefinition,
   CodeListDefinition,
+  CodeListItem,
   CustomFieldDefinition,
   RestorePreview,
   DNBackup,
@@ -33,7 +37,9 @@ import {
   saveCodeList,
   saveCustomField,
   archiveCustomField,
+  deleteCustomField,
   getCustomFields,
+  checkCodeListValueUsage,
 } from '../../db/repository';
 import {
   exportBackupToFile,
@@ -50,6 +56,8 @@ import {
 } from '../../services/sampleDataService';
 import { getStorageStatus, requestPersistentStorage, type StorageStatus } from '../../services/storageService';
 import { DynamicIcon } from '../common/DynamicIcon';
+import { SwipeableRow, type SwipeActionItem } from '../common/SwipeableRow';
+import { ConfirmDeleteModal, type DeleteTargetInfo } from '../common/ConfirmDeleteModal';
 import { db } from '../../db';
 
 interface SettingsViewProps {
@@ -70,6 +78,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onRefreshData,
 }) => {
   const [activeSection, setActiveSection] = useState<'general' | 'codelists' | 'fields' | 'backup' | 'demo'>('general');
+  const [codeListSubTab, setCodeListSubTab] = useState<'events' | 'activities' | 'lookups'>('events');
+  const [selectedLookupKey, setSelectedLookupKey] = useState<string>('expense_categories');
+  const [activeSwipeId, setActiveSwipeId] = useState<string | null>(null);
 
   // Storage status
   const [storageStatus, setStorageStatus] = useState<StorageStatus | null>(null);
@@ -80,7 +91,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Backup & Restore states
   const [exporting, setExporting] = useState(false);
-  const [restoreFileJson, setRestoreFileJson] = useState<string | null>(null);
+  const [, setRestoreFileJson] = useState<string | null>(null);
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [validatedBackup, setValidatedBackup] = useState<DNBackup | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
@@ -96,17 +107,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [newFieldType, setNewFieldType] = useState<any>('text');
   const [newFieldOptions, setNewFieldOptions] = useState('');
 
+  // Editing dialogs
+  const [editingEventType, setEditingEventType] = useState<EventTypeDefinition | null>(null);
+  const [editingActivityType, setEditingActivityType] = useState<ActivityTypeDefinition | null>(null);
+  const [editingLookupItem, setEditingLookupItem] = useState<{ listKey: string; item: CodeListItem } | null>(null);
+  const [editingCustomField, setEditingCustomField] = useState<CustomFieldDefinition | null>(null);
+
+  // In-app delete confirmation modal state
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTargetInfo | null>(null);
+  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
+
   // Event Type creation modal / form
   const [newTypeName, setNewTypeName] = useState('');
   const [newTypeIcon, setNewTypeIcon] = useState('Calendar');
   const [newTypeColor, setNewTypeColor] = useState('#059669');
   const [newTypeDesc, setNewTypeDesc] = useState('');
 
-  // Activity Type creation modal / form
+  // Activity Type creation form
   const [newActName, setNewActName] = useState('');
   const [newActIcon, setNewActIcon] = useState('CheckSquare');
   const [newActColor, setNewActColor] = useState('#3b82f6');
   const [newActDesc, setNewActDesc] = useState('');
+
+  // Lookup Value creation form
+  const [newLookupLabel, setNewLookupLabel] = useState('');
+  const [newLookupColor, setNewLookupColor] = useState('#10b981');
 
   // Feedback message
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
@@ -299,14 +324,135 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     await onRefreshData();
   };
 
-  const handleDeleteEventType = async (id: string) => {
-    const res = await deleteEventType(id);
-    if (!res.success) {
-      alert(res.reason);
-    } else {
-      setActionFeedback('Event type deleted.');
-      await onRefreshData();
-    }
+  const handleUpdateEventType = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEventType) return;
+    await saveEventType(editingEventType);
+    setEditingEventType(null);
+    setActionFeedback('Event type updated successfully.');
+    await onRefreshData();
+  };
+
+  const handleDeleteEventType = (t: EventTypeDefinition) => {
+    setDeleteTarget({
+      type: 'codelist',
+      id: t.id,
+      title: t.name,
+      subtitle: 'Event Type Definition',
+    });
+    setIsConfirmDeleteOpen(true);
+  };
+
+  // Activity Type Management
+  const handleCreateActivityType = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newActName.trim()) return;
+
+    await saveActivityType({
+      name: newActName.trim(),
+      description: newActDesc.trim(),
+      icon: newActIcon,
+      color: newActColor,
+      defaultStatus: 'pending',
+      defaultPriority: 'medium',
+      displayOrder: activityTypes.length + 1,
+      enabled: true,
+    });
+
+    setNewActName('');
+    setNewActDesc('');
+    setActionFeedback('Activity type created successfully!');
+    await onRefreshData();
+  };
+
+  const handleUpdateActivityType = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingActivityType) return;
+    await saveActivityType(editingActivityType);
+    setEditingActivityType(null);
+    setActionFeedback('Activity type updated successfully.');
+    await onRefreshData();
+  };
+
+  const handleDeleteActivityType = (at: ActivityTypeDefinition) => {
+    setDeleteTarget({
+      type: 'codelist',
+      id: at.id,
+      title: at.name,
+      subtitle: 'Activity Type Definition',
+    });
+    setIsConfirmDeleteOpen(true);
+  };
+
+  // Lookup Code List Values Management
+  const currentLookupList = codeLists.find(cl => cl.key === selectedLookupKey);
+
+  const handleAddLookupValue = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newLookupLabel.trim() || !currentLookupList) return;
+
+    const newValue: CodeListItem = {
+      id: `val_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      label: newLookupLabel.trim(),
+      color: newLookupColor,
+      enabled: true,
+    };
+
+    const updatedList: CodeListDefinition = {
+      ...currentLookupList,
+      values: [...currentLookupList.values, newValue],
+    };
+
+    await saveCodeList(updatedList);
+    setNewLookupLabel('');
+    setActionFeedback(`Added "${newValue.label}" to ${currentLookupList.name}.`);
+    await onRefreshData();
+  };
+
+  const handleUpdateLookupItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingLookupItem) return;
+
+    const list = codeLists.find(cl => cl.key === editingLookupItem.listKey);
+    if (!list) return;
+
+    const updatedValues = list.values.map(v =>
+      v.id === editingLookupItem.item.id ? editingLookupItem.item : v
+    );
+
+    await saveCodeList({
+      ...list,
+      values: updatedValues,
+    });
+
+    setEditingLookupItem(null);
+    setActionFeedback(`Updated code list item.`);
+    await onRefreshData();
+  };
+
+  const handleDeleteLookupValue = async (item: CodeListItem) => {
+    if (!currentLookupList) return;
+
+    const usageCount = await checkCodeListValueUsage(currentLookupList.key, item.label);
+    setDeleteTarget({
+      type: 'codelist',
+      id: item.id,
+      title: item.label,
+      subtitle: `${currentLookupList.name} value`,
+      usageCount,
+      onUnlinkInstead:
+        usageCount > 0
+          ? async () => {
+              const updatedValues = currentLookupList.values.map(v =>
+                v.id === item.id ? { ...v, enabled: false } : v
+              );
+              await saveCodeList({ ...currentLookupList, values: updatedValues });
+              setActionFeedback(`Disabled "${item.label}" safely.`);
+              await onRefreshData();
+            }
+          : undefined,
+    });
+    setIsConfirmDeleteOpen(true);
   };
 
   // Custom Field Management
@@ -339,11 +485,71 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setActionFeedback('Custom field added successfully!');
   };
 
+  const handleUpdateCustomField = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCustomField) return;
+
+    await saveCustomField(editingCustomField);
+    setEditingCustomField(null);
+    const updated = await getCustomFields('event', selectedEventTypeForFields);
+    setCustomFieldsList(updated);
+    setActionFeedback(`Updated custom field "${editingCustomField.label}".`);
+  };
+
   const handleArchiveField = async (id: string) => {
     await archiveCustomField(id);
     const updated = await getCustomFields('event', selectedEventTypeForFields);
     setCustomFieldsList(updated);
     setActionFeedback('Custom field archived.');
+  };
+
+  const handleDeleteFieldPermanently = (f: CustomFieldDefinition) => {
+    setDeleteTarget({
+      type: 'customfield',
+      id: f.id,
+      title: f.label,
+      subtitle: `Target Type ID: ${f.targetTypeId} · Key: ${f.key}`,
+    });
+    setIsConfirmDeleteOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+
+    if (deleteTarget.type === 'codelist') {
+      const isEvType = eventTypes.some(t => t.id === deleteTarget.id);
+      const isActType = activityTypes.some(at => at.id === deleteTarget.id);
+
+      if (isEvType) {
+        const res = await deleteEventType(deleteTarget.id);
+        if (!res.success) {
+          setActionFeedback(res.reason || 'Cannot delete event type.');
+        } else {
+          setActionFeedback(`Event type "${deleteTarget.title}" deleted.`);
+          await onRefreshData();
+        }
+      } else if (isActType) {
+        const res = await deleteActivityType(deleteTarget.id);
+        if (!res.success) {
+          setActionFeedback(res.reason || 'Cannot delete activity type.');
+        } else {
+          setActionFeedback(`Activity type "${deleteTarget.title}" deleted.`);
+          await onRefreshData();
+        }
+      } else if (currentLookupList) {
+        const updatedValues = currentLookupList.values.filter(v => v.id !== deleteTarget.id);
+        await saveCodeList({ ...currentLookupList, values: updatedValues });
+        setActionFeedback(`Removed "${deleteTarget.title}".`);
+        await onRefreshData();
+      }
+    } else if (deleteTarget.type === 'customfield') {
+      await deleteCustomField(deleteTarget.id);
+      const updated = await getCustomFields('event', selectedEventTypeForFields);
+      setCustomFieldsList(updated);
+      setActionFeedback(`Field "${deleteTarget.title}" permanently deleted.`);
+    }
+
+    setDeleteTarget(null);
   };
 
   return (
@@ -355,7 +561,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             System & Data Preferences
           </h2>
           <div className="text-xs text-stone-500 mt-0.5">
-            Configure code lists, custom field schemas, storage persistence, and portable backups.
+            Configure code lists, custom field schemas, storage persistence, and portable backups. Swipe left on rows to edit or delete.
           </div>
         </div>
 
@@ -381,7 +587,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <div className="flex items-center gap-1 overflow-x-auto pb-1">
         {[
           { id: 'general', label: 'General & Storage', icon: SettingsIcon },
-          { id: 'codelists', label: 'Event & Activity Types', icon: Sliders },
+          { id: 'codelists', label: 'Code Lists & Types', icon: Sliders },
           { id: 'fields', label: 'Custom Field Builder', icon: Sliders },
           { id: 'backup', label: 'Data & Backup', icon: Database },
           { id: 'demo', label: 'Sample Data', icon: Sparkles },
@@ -526,126 +732,506 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       )}
 
-      {/* ---------------- SECTION 2: EVENT & ACTIVITY TYPES ---------------- */}
+      {/* ---------------- SECTION 2: CODE LISTS & CUSTOM TYPES ---------------- */}
       {activeSection === 'codelists' && (
         <div className="space-y-6">
-          {/* Create New Event Type Form */}
-          <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-5 shadow-xs space-y-4">
-            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
-              Create New Event Type
-            </h3>
-            <p className="text-xs text-stone-500">
-              Define your own customized life entity (e.g. Vehicle Maintenance, Baby Milestones, Book Reading, Travel Journal) without writing code!
-            </p>
+          {/* Sub Tab Switcher */}
+          <div className="flex items-center p-1 bg-stone-100 dark:bg-stone-800 rounded-xl text-xs font-semibold">
+            <button
+              onClick={() => setCodeListSubTab('events')}
+              className={`flex-1 py-1.5 rounded-lg transition ${
+                codeListSubTab === 'events'
+                  ? 'bg-white dark:bg-stone-900 text-emerald-800 dark:text-emerald-400 shadow-2xs'
+                  : 'text-stone-600 dark:text-stone-400'
+              }`}
+            >
+              Event Types ({eventTypes.length})
+            </button>
+            <button
+              onClick={() => setCodeListSubTab('activities')}
+              className={`flex-1 py-1.5 rounded-lg transition ${
+                codeListSubTab === 'activities'
+                  ? 'bg-white dark:bg-stone-900 text-emerald-800 dark:text-emerald-400 shadow-2xs'
+                  : 'text-stone-600 dark:text-stone-400'
+              }`}
+            >
+              Activity Types ({activityTypes.length})
+            </button>
+            <button
+              onClick={() => setCodeListSubTab('lookups')}
+              className={`flex-1 py-1.5 rounded-lg transition ${
+                codeListSubTab === 'lookups'
+                  ? 'bg-white dark:bg-stone-900 text-emerald-800 dark:text-emerald-400 shadow-2xs'
+                  : 'text-stone-600 dark:text-stone-400'
+              }`}
+            >
+              Lookup Lists ({codeLists.length})
+            </button>
+          </div>
 
-            <form onSubmit={handleCreateEventType} className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[11px] font-semibold text-stone-500">Type Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={newTypeName}
-                    onChange={e => setNewTypeName(e.target.value)}
-                    placeholder="e.g. Vehicle Maintenance"
-                    className="mt-1 w-full px-3 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl"
-                  />
+          {/* SUB-TAB 1: EVENT TYPES */}
+          {codeListSubTab === 'events' && (
+            <div className="space-y-6">
+              {/* Create New Event Type Form */}
+              <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-5 shadow-xs space-y-4">
+                <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                  Create New Event Type
+                </h3>
+                <p className="text-xs text-stone-500">
+                  Define custom entities (e.g. Vehicle Maintenance, Baby Milestones, Book Reading, Travel Journal) without writing code!
+                </p>
+
+                <form onSubmit={handleCreateEventType} className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-stone-500">Type Name</label>
+                      <input
+                        type="text"
+                        required
+                        value={newTypeName}
+                        onChange={e => setNewTypeName(e.target.value)}
+                        placeholder="e.g. Vehicle Maintenance"
+                        className="mt-1 w-full px-3 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-stone-500">Icon</label>
+                      <select
+                        value={newTypeIcon}
+                        onChange={e => setNewTypeIcon(e.target.value)}
+                        className="mt-1 w-full px-3 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl"
+                      >
+                        <option value="Car">Car / Vehicle</option>
+                        <option value="Plane">Plane / Travel</option>
+                        <option value="BookOpen">Book / Reading</option>
+                        <option value="GraduationCap">Education / Study</option>
+                        <option value="Home">Home / Property</option>
+                        <option value="Briefcase">Career / Work</option>
+                        <option value="Activity">Fitness / Health</option>
+                        <option value="Award">Award / Achievement</option>
+                        <option value="Calendar">General Calendar</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-stone-500">Color</label>
+                      <input
+                        type="color"
+                        value={newTypeColor}
+                        onChange={e => setNewTypeColor(e.target.value)}
+                        className="mt-1 w-full h-8 p-1 bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold text-stone-500">Description</label>
+                    <input
+                      type="text"
+                      value={newTypeDesc}
+                      onChange={e => setNewTypeDesc(e.target.value)}
+                      placeholder="e.g. Track car servicing, oil changes, tire rotations and fuel costs"
+                      className="mt-1 w-full px-3 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="px-4 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-xl transition flex items-center gap-1.5 shadow-xs"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Event Type</span>
+                  </button>
+                </form>
+              </div>
+
+              {/* Event Types List with SwipeableRows */}
+              <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-5 shadow-xs space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                    Active Event Types ({eventTypes.length})
+                  </h3>
+                  <span className="text-[11px] text-stone-400">Swipe row to Edit or Delete</span>
                 </div>
 
-                <div>
-                  <label className="text-[11px] font-semibold text-stone-500">Icon</label>
-                  <select
-                    value={newTypeIcon}
-                    onChange={e => setNewTypeIcon(e.target.value)}
-                    className="mt-1 w-full px-3 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl"
+                <div className="divide-y divide-stone-100 dark:divide-stone-800">
+                  {eventTypes.map(t => {
+                    const actions: SwipeActionItem[] = [
+                      {
+                        id: 'edit',
+                        label: 'Edit',
+                        icon: <Edit2 className="w-3.5 h-3.5" />,
+                        variant: 'edit',
+                        onClick: () => setEditingEventType(t),
+                        ariaLabel: `Edit event type ${t.name}`,
+                      },
+                      {
+                        id: 'delete',
+                        label: 'Delete',
+                        icon: <Trash2 className="w-3.5 h-3.5" />,
+                        variant: 'delete',
+                        onClick: () => handleDeleteEventType(t),
+                        ariaLabel: `Delete event type ${t.name}`,
+                      },
+                    ];
+
+                    return (
+                      <SwipeableRow
+                        key={t.id}
+                        id={`evt_type_${t.id}`}
+                        activeRowId={activeSwipeId}
+                        onRowOpen={setActiveSwipeId}
+                        onRowClose={() => setActiveSwipeId(null)}
+                        actions={actions}
+                      >
+                        <div className="py-3 px-2 flex items-center justify-between gap-3 text-xs group hover:bg-stone-50/50 dark:hover:bg-stone-800/20 transition">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className="w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0"
+                              style={{ backgroundColor: t.color }}
+                            >
+                              <DynamicIcon name={t.icon} className="w-4 h-4 text-white" />
+                            </div>
+                            <div>
+                              <div className="font-bold text-stone-900 dark:text-stone-100">{t.name}</div>
+                              <div className="text-stone-500 text-[11px]">{t.description}</div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedEventTypeForFields(t.id);
+                                setActiveSection('fields');
+                              }}
+                              className="text-emerald-700 dark:text-emerald-400 font-semibold hover:underline"
+                            >
+                              Fields
+                            </button>
+                            {/* Visible desktop buttons */}
+                            <div className="hidden sm:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                              <button
+                                type="button"
+                                onClick={() => setEditingEventType(t)}
+                                className="p-1 text-stone-400 hover:text-stone-700 rounded"
+                                title="Edit"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteEventType(t)}
+                                className="p-1 text-stone-400 hover:text-rose-500 rounded"
+                                title="Delete"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </SwipeableRow>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SUB-TAB 2: ACTIVITY TYPES */}
+          {codeListSubTab === 'activities' && (
+            <div className="space-y-6">
+              {/* Create New Activity Type */}
+              <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-5 shadow-xs space-y-4">
+                <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                  Create New Activity Type
+                </h3>
+                <form onSubmit={handleCreateActivityType} className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-stone-500">Name</label>
+                      <input
+                        type="text"
+                        required
+                        value={newActName}
+                        onChange={e => setNewActName(e.target.value)}
+                        placeholder="e.g. Oil Change, Inspection"
+                        className="mt-1 w-full px-3 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-stone-500">Icon</label>
+                      <select
+                        value={newActIcon}
+                        onChange={e => setNewActIcon(e.target.value)}
+                        className="mt-1 w-full px-3 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl"
+                      >
+                        <option value="CheckSquare">Task</option>
+                        <option value="Calendar">Appointment</option>
+                        <option value="Flag">Milestone</option>
+                        <option value="FileText">Note</option>
+                        <option value="Clock">Reminder</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-stone-500">Color</label>
+                      <input
+                        type="color"
+                        value={newActColor}
+                        onChange={e => setNewActColor(e.target.value)}
+                        className="mt-1 w-full h-8 p-1 bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-stone-500">Description</label>
+                    <input
+                      type="text"
+                      value={newActDesc}
+                      onChange={e => setNewActDesc(e.target.value)}
+                      placeholder="e.g. Routine vehicle inspection"
+                      className="mt-1 w-full px-3 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-xl transition flex items-center gap-1.5 shadow-xs"
                   >
-                    <option value="Car">Car / Vehicle</option>
-                    <option value="Plane">Plane / Travel</option>
-                    <option value="BookOpen">Book / Reading</option>
-                    <option value="GraduationCap">Education / Study</option>
-                    <option value="Home">Home / Property</option>
-                    <option value="Briefcase">Career / Work</option>
-                    <option value="Activity">Fitness / Health</option>
-                    <option value="Award">Award / Achievement</option>
-                    <option value="Calendar">General Calendar</option>
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Activity Type</span>
+                  </button>
+                </form>
+              </div>
+
+              {/* Activity Types List with SwipeableRows */}
+              <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-5 shadow-xs space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                    Active Activity Types ({activityTypes.length})
+                  </h3>
+                  <span className="text-[11px] text-stone-400">Swipe row to Edit or Delete</span>
+                </div>
+
+                <div className="divide-y divide-stone-100 dark:divide-stone-800">
+                  {activityTypes.map(at => {
+                    const actions: SwipeActionItem[] = [
+                      {
+                        id: 'edit',
+                        label: 'Edit',
+                        icon: <Edit2 className="w-3.5 h-3.5" />,
+                        variant: 'edit',
+                        onClick: () => setEditingActivityType(at),
+                        ariaLabel: `Edit activity type ${at.name}`,
+                      },
+                      {
+                        id: 'delete',
+                        label: 'Delete',
+                        icon: <Trash2 className="w-3.5 h-3.5" />,
+                        variant: 'delete',
+                        onClick: () => handleDeleteActivityType(at),
+                        ariaLabel: `Delete activity type ${at.name}`,
+                      },
+                    ];
+
+                    return (
+                      <SwipeableRow
+                        key={at.id}
+                        id={`act_type_${at.id}`}
+                        activeRowId={activeSwipeId}
+                        onRowOpen={setActiveSwipeId}
+                        onRowClose={() => setActiveSwipeId(null)}
+                        actions={actions}
+                      >
+                        <div className="py-3 px-2 flex items-center justify-between gap-3 text-xs group hover:bg-stone-50/50 dark:hover:bg-stone-800/20 transition">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className="w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0"
+                              style={{ backgroundColor: at.color }}
+                            >
+                              <DynamicIcon name={at.icon} className="w-4 h-4 text-white" />
+                            </div>
+                            <div>
+                              <div className="font-bold text-stone-900 dark:text-stone-100">{at.name}</div>
+                              <div className="text-stone-500 text-[11px]">{at.description}</div>
+                            </div>
+                          </div>
+
+                          <div className="hidden sm:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                            <button
+                              type="button"
+                              onClick={() => setEditingActivityType(at)}
+                              className="p-1 text-stone-400 hover:text-stone-700 rounded"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteActivityType(at)}
+                              className="p-1 text-stone-400 hover:text-rose-500 rounded"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </SwipeableRow>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SUB-TAB 3: REUSABLE LOOKUP LISTS (Categories, Statuses, Priorities, Methods) */}
+          {codeListSubTab === 'lookups' && (
+            <div className="space-y-6">
+              <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-5 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                      Configure Lookup List Values
+                    </h3>
+                    <p className="text-xs text-stone-500">
+                      Select any code list to add, edit, or safely remove values. Swipe left on any value row.
+                    </p>
+                  </div>
+
+                  <select
+                    value={selectedLookupKey}
+                    onChange={e => setSelectedLookupKey(e.target.value)}
+                    className="px-3 py-1.5 text-xs font-bold bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl"
+                  >
+                    {codeLists.map(cl => (
+                      <option key={cl.id} value={cl.key}>
+                        {cl.name} ({cl.values.length})
+                      </option>
+                    ))}
                   </select>
                 </div>
 
-                <div>
-                  <label className="text-[11px] font-semibold text-stone-500">Color</label>
-                  <input
-                    type="color"
-                    value={newTypeColor}
-                    onChange={e => setNewTypeColor(e.target.value)}
-                    className="mt-1 w-full h-8 p-1 bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl cursor-pointer"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[11px] font-semibold text-stone-500">Description</label>
-                <input
-                  type="text"
-                  value={newTypeDesc}
-                  onChange={e => setNewTypeDesc(e.target.value)}
-                  placeholder="e.g. Track car servicing, oil changes, tire rotations and fuel costs"
-                  className="mt-1 w-full px-3 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-xl"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-xl transition flex items-center gap-1.5 shadow-xs"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Add Event Type</span>
-              </button>
-            </form>
-          </div>
-
-          {/* Existing Event Types List */}
-          <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-5 shadow-xs space-y-4">
-            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
-              Active Event Types ({eventTypes.length})
-            </h3>
-            <div className="divide-y divide-stone-100 dark:divide-stone-800">
-              {eventTypes.map(t => (
-                <div key={t.id} className="py-3 flex items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0"
-                      style={{ backgroundColor: t.color }}
-                    >
-                      <DynamicIcon name={t.icon} className="w-4 h-4 text-white" />
-                    </div>
-                    <div>
-                      <div className="font-bold text-stone-900 dark:text-stone-100">{t.name}</div>
-                      <div className="text-stone-500 text-[11px]">{t.description}</div>
-                    </div>
-                  </div>
-
+                {/* Add Value Form */}
+                <form onSubmit={handleAddLookupValue} className="p-3.5 bg-stone-50 dark:bg-stone-800/40 rounded-xl space-y-2 border border-stone-200/60 dark:border-stone-700/60">
+                  <span className="text-xs font-bold text-stone-800 dark:text-stone-200">
+                    Add New Value to {currentLookupList?.name}
+                  </span>
                   <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={newLookupLabel}
+                      onChange={e => setNewLookupLabel(e.target.value)}
+                      placeholder="e.g. Travel, Urgent, PayPal"
+                      className="flex-1 px-3 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg"
+                    />
+                    <input
+                      type="color"
+                      value={newLookupColor}
+                      onChange={e => setNewLookupColor(e.target.value)}
+                      className="w-8 h-8 p-0.5 rounded-lg border border-stone-300 dark:border-stone-700 cursor-pointer"
+                    />
                     <button
-                      onClick={() => {
-                        setSelectedEventTypeForFields(t.id);
-                        setActiveSection('fields');
-                      }}
-                      className="text-emerald-700 dark:text-emerald-400 font-semibold hover:underline"
+                      type="submit"
+                      className="px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg transition flex items-center gap-1 shadow-xs shrink-0"
                     >
-                      Fields
-                    </button>
-                    <button
-                      onClick={() => handleDeleteEventType(t.id)}
-                      className="text-stone-400 hover:text-rose-500 p-1"
-                      title="Delete type"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Value</span>
                     </button>
                   </div>
-                </div>
-              ))}
+                </form>
+
+                {/* Values List with SwipeableRows */}
+                {currentLookupList && (
+                  <div className="divide-y divide-stone-100 dark:divide-stone-800 pt-1">
+                    {currentLookupList.values.map(item => {
+                      const actions: SwipeActionItem[] = [
+                        {
+                          id: 'edit',
+                          label: 'Edit',
+                          icon: <Edit2 className="w-3.5 h-3.5" />,
+                          variant: 'edit',
+                          onClick: () =>
+                            setEditingLookupItem({
+                              listKey: currentLookupList.key,
+                              item,
+                            }),
+                          ariaLabel: `Edit lookup value ${item.label}`,
+                        },
+                        {
+                          id: 'delete',
+                          label: 'Delete',
+                          icon: <Trash2 className="w-3.5 h-3.5" />,
+                          variant: 'delete',
+                          onClick: () => handleDeleteLookupValue(item),
+                          ariaLabel: `Delete lookup value ${item.label}`,
+                        },
+                      ];
+
+                      return (
+                        <SwipeableRow
+                          key={item.id}
+                          id={`lookup_${item.id}`}
+                          activeRowId={activeSwipeId}
+                          onRowOpen={setActiveSwipeId}
+                          onRowClose={() => setActiveSwipeId(null)}
+                          actions={actions}
+                        >
+                          <div className="py-2.5 px-2 flex items-center justify-between text-xs group hover:bg-stone-50/50 dark:hover:bg-stone-800/20 transition">
+                            <div className="flex items-center gap-2.5">
+                              <span
+                                className="w-3 h-3 rounded-full shrink-0"
+                                style={{ backgroundColor: item.color || '#10b981' }}
+                              />
+                              <span
+                                className={`font-semibold ${
+                                  item.enabled
+                                    ? 'text-stone-900 dark:text-stone-100'
+                                    : 'line-through text-stone-400'
+                                }`}
+                              >
+                                {item.label}
+                              </span>
+                              {!item.enabled && (
+                                <span className="text-[10px] bg-stone-100 dark:bg-stone-800 px-1.5 py-0.5 rounded text-stone-400">
+                                  Disabled
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Visible desktop actions */}
+                            <div className="hidden sm:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditingLookupItem({
+                                    listKey: currentLookupList.key,
+                                    item,
+                                  })
+                                }
+                                className="p-1 text-stone-400 hover:text-stone-700 rounded"
+                                title="Edit"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteLookupValue(item)}
+                                className="p-1 text-stone-400 hover:text-rose-500 rounded"
+                                title="Delete"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </SwipeableRow>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -659,7 +1245,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   Visual Dynamic Field Builder
                 </h3>
                 <div className="text-xs text-stone-500">
-                  Add custom structured inputs to any event or activity type.
+                  Add custom structured inputs to any event or activity type. Swipe left on field rows to archive or delete.
                 </div>
               </div>
 
@@ -769,31 +1355,85 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </button>
             </form>
 
-            {/* List of Fields */}
+            {/* List of Fields with SwipeableRows */}
             <div className="space-y-2 pt-2">
               <h4 className="text-xs font-bold uppercase tracking-wider text-stone-400">
                 Configured Fields ({customFieldsList.length})
               </h4>
               {customFieldsList.length > 0 ? (
                 <div className="divide-y divide-stone-100 dark:divide-stone-800">
-                  {customFieldsList.map(f => (
-                    <div key={f.id} className="py-2.5 flex items-center justify-between text-xs">
-                      <div>
-                        <span className="font-bold text-stone-900 dark:text-stone-100">{f.label}</span>
-                        <span className="ml-2 font-mono text-[11px] text-stone-400">({f.key})</span>
-                        <span className="ml-2 text-stone-500 uppercase text-[10px] bg-stone-100 dark:bg-stone-800 px-1.5 py-0.5 rounded">
-                          {f.type}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => handleArchiveField(f.id)}
-                        className="text-stone-400 hover:text-rose-500 p-1"
-                        title="Archive field"
+                  {customFieldsList.map(f => {
+                    const fieldActions: SwipeActionItem[] = [
+                      {
+                        id: 'edit',
+                        label: 'Edit',
+                        icon: <Edit2 className="w-3.5 h-3.5" />,
+                        variant: 'edit',
+                        onClick: () => setEditingCustomField(f),
+                        ariaLabel: `Edit field ${f.label}`,
+                      },
+                      {
+                        id: 'delete',
+                        label: 'Delete',
+                        icon: <Trash2 className="w-3.5 h-3.5" />,
+                        variant: 'delete',
+                        onClick: () => handleDeleteFieldPermanently(f),
+                        ariaLabel: `Delete field ${f.label}`,
+                      },
+                    ];
+
+                    return (
+                      <SwipeableRow
+                        key={f.id}
+                        id={`cf_${f.id}`}
+                        activeRowId={activeSwipeId}
+                        onRowOpen={setActiveSwipeId}
+                        onRowClose={() => setActiveSwipeId(null)}
+                        actions={fieldActions}
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
+                        <div className="py-2.5 px-2 flex items-center justify-between text-xs group hover:bg-stone-50/50 dark:hover:bg-stone-800/20 transition">
+                          <div>
+                            <span className="font-bold text-stone-900 dark:text-stone-100">{f.label}</span>
+                            <span className="ml-2 font-mono text-[11px] text-stone-400">({f.key})</span>
+                            <span className="ml-2 text-stone-500 uppercase text-[10px] bg-stone-100 dark:bg-stone-800 px-1.5 py-0.5 rounded">
+                              {f.type}
+                            </span>
+                            {f.required && (
+                              <span className="ml-1.5 text-rose-500 text-[10px] font-semibold">
+                                Required
+                              </span>
+                            )}
+                          </div>
+                          <div className="hidden sm:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                            <button
+                              type="button"
+                              onClick={() => setEditingCustomField(f)}
+                              className="p-1 text-stone-400 hover:text-stone-700 rounded"
+                              title="Edit field"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleArchiveField(f.id)}
+                              className="p-1 text-stone-400 hover:text-stone-700 rounded text-[11px]"
+                              title="Archive field"
+                            >
+                              Archive
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteFieldPermanently(f)}
+                              className="p-1 text-stone-400 hover:text-rose-500 rounded"
+                              title="Delete permanently"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </SwipeableRow>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="py-4 text-center text-xs text-stone-400">
@@ -1077,6 +1717,323 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* EDIT MODAL: Event Type */}
+      {editingEventType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-sm bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-stone-800">
+              <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                Edit Event Type
+              </h3>
+              <button onClick={() => setEditingEventType(null)} className="p-1 text-stone-400 hover:text-stone-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleUpdateEventType} className="space-y-3">
+              <div>
+                <label className="text-[11px] font-semibold text-stone-500">Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editingEventType.name}
+                  onChange={e => setEditingEventType({ ...editingEventType, name: e.target.value })}
+                  className="mt-1 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-stone-500">Description</label>
+                <input
+                  type="text"
+                  value={editingEventType.description}
+                  onChange={e => setEditingEventType({ ...editingEventType, description: e.target.value })}
+                  className="mt-1 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingEventType(null)}
+                  className="px-3 py-1.5 text-xs font-semibold text-stone-600 dark:text-stone-400"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT MODAL: Activity Type */}
+      {editingActivityType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-sm bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-stone-800">
+              <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                Edit Activity Type
+              </h3>
+              <button onClick={() => setEditingActivityType(null)} className="p-1 text-stone-400 hover:text-stone-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleUpdateActivityType} className="space-y-3">
+              <div>
+                <label className="text-[11px] font-semibold text-stone-500">Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editingActivityType.name}
+                  onChange={e => setEditingActivityType({ ...editingActivityType, name: e.target.value })}
+                  className="mt-1 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-stone-500">Description</label>
+                <input
+                  type="text"
+                  value={editingActivityType.description}
+                  onChange={e => setEditingActivityType({ ...editingActivityType, description: e.target.value })}
+                  className="mt-1 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingActivityType(null)}
+                  className="px-3 py-1.5 text-xs font-semibold text-stone-600 dark:text-stone-400"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT MODAL: Lookup Code List Item */}
+      {editingLookupItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-sm bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-stone-800">
+              <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                Edit Lookup Value
+              </h3>
+              <button onClick={() => setEditingLookupItem(null)} className="p-1 text-stone-400 hover:text-stone-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleUpdateLookupItem} className="space-y-3">
+              <div>
+                <label className="text-[11px] font-semibold text-stone-500">Label</label>
+                <input
+                  type="text"
+                  required
+                  value={editingLookupItem.item.label}
+                  onChange={e =>
+                    setEditingLookupItem({
+                      ...editingLookupItem,
+                      item: { ...editingLookupItem.item, label: e.target.value },
+                    })
+                  }
+                  className="mt-1 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-stone-500">Color</label>
+                <input
+                  type="color"
+                  value={editingLookupItem.item.color || '#10b981'}
+                  onChange={e =>
+                    setEditingLookupItem({
+                      ...editingLookupItem,
+                      item: { ...editingLookupItem.item, color: e.target.value },
+                    })
+                  }
+                  className="mt-1 w-full h-8 p-0.5 rounded-lg border border-stone-300 dark:border-stone-700 cursor-pointer"
+                />
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <label className="flex items-center gap-1.5 text-xs text-stone-700 dark:text-stone-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingLookupItem.item.enabled}
+                    onChange={e =>
+                      setEditingLookupItem({
+                        ...editingLookupItem,
+                        item: { ...editingLookupItem.item, enabled: e.target.checked },
+                      })
+                    }
+                    className="w-4 h-4 rounded text-emerald-700"
+                  />
+                  <span>Active & Visible in Forms</span>
+                </label>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingLookupItem(null)}
+                  className="px-3 py-1.5 text-xs font-semibold text-stone-600 dark:text-stone-400"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT MODAL: Custom Field */}
+      {editingCustomField && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-sm bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-stone-800">
+              <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                Edit Custom Field
+              </h3>
+              <button
+                onClick={() => setEditingCustomField(null)}
+                className="p-1 text-stone-400 hover:text-stone-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleUpdateCustomField} className="space-y-3">
+              <div>
+                <label className="text-[11px] font-semibold text-stone-500">Label</label>
+                <input
+                  type="text"
+                  required
+                  value={editingCustomField.label}
+                  onChange={e =>
+                    setEditingCustomField({ ...editingCustomField, label: e.target.value })
+                  }
+                  className="mt-1 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-stone-500">Field Key</label>
+                <input
+                  type="text"
+                  required
+                  value={editingCustomField.key}
+                  onChange={e =>
+                    setEditingCustomField({ ...editingCustomField, key: e.target.value })
+                  }
+                  className="mt-1 w-full px-2.5 py-1.5 text-xs font-mono bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-stone-500">Field Type</label>
+                <select
+                  value={editingCustomField.type}
+                  onChange={e =>
+                    setEditingCustomField({ ...editingCustomField, type: e.target.value as any })
+                  }
+                  className="mt-1 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg"
+                >
+                  <option value="text">Short Text</option>
+                  <option value="textarea">Long Text</option>
+                  <option value="number">Number</option>
+                  <option value="decimal">Decimal</option>
+                  <option value="currency">Currency</option>
+                  <option value="date">Date</option>
+                  <option value="time">Time</option>
+                  <option value="datetime">Date & Time</option>
+                  <option value="boolean">Boolean</option>
+                  <option value="checkbox">Checkbox</option>
+                  <option value="select">Select Dropdown</option>
+                  <option value="multiselect">Multi-Select</option>
+                  <option value="url">URL Link</option>
+                  <option value="email">Email</option>
+                  <option value="phone">Phone</option>
+                  <option value="rating">Rating</option>
+                  <option value="duration">Duration</option>
+                </select>
+              </div>
+              {(editingCustomField.type === 'select' ||
+                editingCustomField.type === 'multiselect') && (
+                <div>
+                  <label className="text-[11px] font-semibold text-stone-500">
+                    Dropdown Options (comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={editingCustomField.options?.join(', ') || ''}
+                    onChange={e =>
+                      setEditingCustomField({
+                        ...editingCustomField,
+                        options: e.target.value
+                          .split(',')
+                          .map(s => s.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    className="mt-1 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg"
+                  />
+                </div>
+              )}
+              <div className="flex items-center gap-2 pt-1">
+                <label className="flex items-center gap-1.5 text-xs text-stone-700 dark:text-stone-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingCustomField.required || false}
+                    onChange={e =>
+                      setEditingCustomField({
+                        ...editingCustomField,
+                        required: e.target.checked,
+                      })
+                    }
+                    className="w-4 h-4 rounded text-emerald-700"
+                  />
+                  <span>Required in Forms</span>
+                </label>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingCustomField(null)}
+                  className="px-3 py-1.5 text-xs font-semibold text-stone-600 dark:text-stone-400"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Settings deletion */}
+      <ConfirmDeleteModal
+        isOpen={isConfirmDeleteOpen}
+        onClose={() => setIsConfirmDeleteOpen(false)}
+        onConfirm={handleConfirmDelete}
+        target={deleteTarget}
+        currencySymbol={settings.currencySymbol}
+      />
     </div>
   );
 };
